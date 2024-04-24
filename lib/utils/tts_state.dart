@@ -5,5 +5,6 @@ enum TtsState {
   continued,
   initialized,
   error,
-  loading
+  loading,
+  downloading
 }

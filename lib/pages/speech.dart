@@ -1,8 +1,11 @@
+import 'dart:io';
+
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
-import 'package:speech_translation/utils/speech_to_text.dart';
-import 'package:speech_translation/utils/stt_state.dart';
+import 'package:speech_translation/utils/audio_to_text.dart';
 import 'package:speech_translation/utils/text_to_speech.dart';
 import 'package:speech_translation/utils/translator.dart';
+import 'package:speech_translation/utils/tts_state.dart';
 
 class SpeechPage extends StatefulWidget {
   const SpeechPage({super.key});
@@ -12,15 +15,15 @@ class SpeechPage extends StatefulWidget {
 }
 
 class _SpeechPageState extends State<SpeechPage> {
-  final MyStt _stt = MyStt();
+  final MyAtt _att = MyAtt();
   final MyTts _tts = MyTts();
   final MyTranslator _translator = MyTranslator();
-  String _spokenText = '';
-  String _translatedText = '';
-  SttState _status = SttState.stopped;
-  String _selectedInputLanguage = 'en_US';
-  String _selectedOutputLanguage = 'en-US';
-  final List<dynamic> _ttsVoices = [
+
+  File? _selectedFile;
+  String _selectedInputLanguage = 'en-US';
+  String _selectedOutputLanguage = 'hi-IN';
+  TtsState _status = TtsState.initialized;
+  final List<dynamic> _voices = [
     {
       "name": "English",
       "id": "en-US",
@@ -58,83 +61,52 @@ class _SpeechPageState extends State<SpeechPage> {
       "id": "ms-MY",
     },
   ];
-  final List<dynamic> _sttVoices = [
-    {
-      "name": "English",
-      "id": "en_US",
-    },
-    {
-      "name": "Hindi",
-      "id": "hi_IN",
-    },
-    {
-      "name": "Korean",
-      "id": "ko_KR",
-    },
-    {
-      "name": "Japanese",
-      "id": "ja_JP",
-    },
-    {
-      "name": "Russian",
-      "id": "ru_RU",
-    },
-    {
-      "name": "Arabic",
-      "id": "ar_AE",
-    },
-    {
-      "name": "French",
-      "id": "fr_FR",
-    },
-    {
-      "name": "Portuguese",
-      "id": "pt_PT",
-    },
-    {
-      "name": "Malay",
-      "id": "ms_MY",
-    },
-  ];
-
-  String _getLanguageCode(String language, String type) {
-    if (type == "input") {
-      return language.split("_")[0];
-    } else {
-      return language.split("-")[0];
-    }
-  }
-
-  Future<void> _handleSpeech() async {
-    if (_status != SttState.listening) {
-      await _stt.startListening();
-    } else {
-      await _stt.stopListening();
-    }
-  }
-
-  void _onSpeechResult(String text, SttState status, String emitted) async {
-    setState(() {
-      _spokenText = text;
-      _status = status;
-    });
-    if (emitted == "done") {
-      String translatedOutput = await _translator.getTranslation(
-        text,
-        _getLanguageCode(_selectedInputLanguage, "input"),
-        _getLanguageCode(_selectedOutputLanguage, "output"),
-      );
-      setState(() {
-        _translatedText = translatedOutput;
-      });
-      await _tts.speak(translatedOutput);
-    }
-  }
 
   @override
   void initState() {
     super.initState();
-    _stt.callback = _onSpeechResult;
+    _tts.callback = updateStatus;
+  }
+
+  String _getLanguageCode(String language) {
+    return language.split("-")[0];
+  }
+
+  Future<void> _pickFile() async {
+    FilePickerResult? result = await FilePicker.platform.pickFiles(
+      type: FileType.audio,
+      allowCompression: true,
+    );
+
+    if (result != null) {
+      setState(() {
+        _selectedFile = File(result.files.single.path!);
+      });
+      await _translateSpeech();
+    }
+  }
+
+  Future<void> _translateSpeech() async {
+    String transcribedText =
+        await _att.getText(_selectedInputLanguage, _selectedFile!.path);
+    String translatedOutput = await _translator.getTranslation(
+      transcribedText,
+      _getLanguageCode(_selectedInputLanguage),
+      _getLanguageCode(
+        _selectedOutputLanguage,
+      ),
+    );
+    await _tts.download(
+        translatedOutput,
+        (_voices
+            .where((voice) => voice["id"] == _selectedOutputLanguage)
+            .toList())[0]["name"]);
+  }
+
+  void updateStatus(TtsState status) {
+    setState(() {
+      _status = status;
+    });
   }
 
   @override
@@ -156,11 +128,6 @@ class _SpeechPageState extends State<SpeechPage> {
           const SizedBox(height: 20.0),
           _buildTranslationOutputSection(),
         ],
-      ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _handleSpeech,
-        tooltip: 'Listen',
-        child: Icon(_status == SttState.listening ? Icons.mic : Icons.mic_none),
       ),
     );
   }
@@ -193,9 +160,8 @@ class _SpeechPageState extends State<SpeechPage> {
                       setState(() {
                         _selectedInputLanguage = newValue!;
                       });
-                      _stt.setLocaleId(newValue!);
                     },
-                    items: _sttVoices
+                    items: _voices
                         .map<DropdownMenuItem<String>>(
                           (voice) => DropdownMenuItem<String>(
                             value: voice["id"],
@@ -208,14 +174,11 @@ class _SpeechPageState extends State<SpeechPage> {
               ),
             ),
             const SizedBox(height: 20.0),
-            Text(
-              _spokenText,
-              style: TextStyle(
-                fontSize: 20.0,
-                fontWeight: FontWeight.bold,
-                color: Colors.blue[600],
-              ),
-            ),
+            ElevatedButton(
+                onPressed: _pickFile,
+                child: const Text(
+                  "Pick Audio",
+                )),
           ],
         ),
       ),
@@ -252,7 +215,7 @@ class _SpeechPageState extends State<SpeechPage> {
                     });
                     await _tts.setLanguage(newValue!);
                   },
-                  items: _ttsVoices
+                  items: _voices
                       .map<DropdownMenuItem<String>>(
                         (voice) => DropdownMenuItem<String>(
                           value: voice["id"],
@@ -263,26 +226,13 @@ class _SpeechPageState extends State<SpeechPage> {
                 ),
               ],
             ),
-            const SizedBox(height: 20.0),
-            _translatedText == ""
-                ? const Text("")
-                : Text(
-                    'Translated Text:',
-                    style: TextStyle(
-                      fontSize: 18.0,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.green[800],
-                    ),
-                  ),
-            const SizedBox(height: 10.0),
-            Text(
-              _translatedText,
-              style: TextStyle(
-                fontSize: 20.0,
-                fontWeight: FontWeight.bold,
-                color: Colors.green[600],
-              ),
-            ),
+            _status == TtsState.downloading
+                ? const Text("Downloading...")
+                : _status == TtsState.initialized
+                    ? const Text("")
+                    : const Text(
+                        "See downloaded file in Audio section of phone",
+                      )
           ],
         ),
       ),

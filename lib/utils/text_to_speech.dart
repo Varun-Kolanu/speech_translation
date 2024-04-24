@@ -1,14 +1,20 @@
 import 'package:flutter_tts/flutter_tts.dart';
 import 'dart:async';
-import 'dart:io' show Platform;
+import 'dart:io';
 
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:speech_translation/utils/tts_state.dart';
+import 'package:path_provider/path_provider.dart';
+
+typedef TtsCalback = void Function(
+  TtsState status,
+);
 
 class MyTts {
   late FlutterTts flutterTts;
   String? engine;
   TtsState ttsState = TtsState.initialized;
+  TtsCalback? callback;
 
   // Singleton instance
   static final MyTts _instance = MyTts._internal();
@@ -93,5 +99,12 @@ class MyTts {
 
   Future<void> setLanguage(String language) async {
     await flutterTts.setLanguage(language);
+  }
+
+  Future<void> download(String text, String outputLanguage) async {
+    await flutterTts.awaitSynthCompletion(true);
+    callback?.call(TtsState.downloading);
+    await flutterTts.synthesizeToFile(text, "audio_$outputLanguage.mp3");
+    callback?.call(TtsState.stopped);
   }
 }
