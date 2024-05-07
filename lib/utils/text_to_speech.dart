@@ -3,8 +3,8 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart' show kIsWeb;
-import 'package:speech_translation/utils/tts_state.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:speech_translation/utils/tts_state.dart';
 
 typedef TtsCalback = void Function(
   TtsState status,
@@ -103,8 +103,7 @@ class MyTts {
 
   Future<void> download(String text, String outputLanguage) async {
     await flutterTts.awaitSynthCompletion(true);
-    callback?.call(TtsState.downloading);
-    await flutterTts.synthesizeToFile(text, "audio_$outputLanguage.mp3");
-    callback?.call(TtsState.stopped);
+    String fileName = "audio_$outputLanguage.mp3";
+    await flutterTts.synthesizeToFile(text, fileName);
   }
 }

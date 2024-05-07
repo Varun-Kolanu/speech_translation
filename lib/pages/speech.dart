@@ -1,11 +1,11 @@
-import 'dart:io';
-
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:speech_translation/pages/output.dart';
 import 'package:speech_translation/utils/audio_to_text.dart';
+import 'package:speech_translation/utils/speech_to_text.dart';
+import 'package:speech_translation/utils/stt_state.dart';
 import 'package:speech_translation/utils/text_to_speech.dart';
 import 'package:speech_translation/utils/translator.dart';
-import 'package:speech_translation/utils/tts_state.dart';
 
 class SpeechPage extends StatefulWidget {
   const SpeechPage({super.key});
@@ -17,12 +17,15 @@ class SpeechPage extends StatefulWidget {
 class _SpeechPageState extends State<SpeechPage> {
   final MyAtt _att = MyAtt();
   final MyTts _tts = MyTts();
+  final MyStt _stt = MyStt();
   final MyTranslator _translator = MyTranslator();
 
-  File? _selectedFile;
-  String _selectedInputLanguage = 'en-US';
+  bool _loading = false;
+
+  String? _selectedFilePath;
+  String _selectedInputLanguage = 'en_US';
   String _selectedOutputLanguage = 'hi-IN';
-  TtsState _status = TtsState.initialized;
+  SttState _status = SttState.stopped;
   final List<dynamic> _voices = [
     {
       "name": "English",
@@ -65,14 +68,77 @@ class _SpeechPageState extends State<SpeechPage> {
   @override
   void initState() {
     super.initState();
-    _tts.callback = updateStatus;
+    _stt.callback = _onSpeechResult;
   }
 
-  String _getLanguageCode(String language) {
-    return language.split("-")[0];
+  final List<dynamic> _sttVoices = [
+    {
+      "name": "English",
+      "id": "en_US",
+    },
+    {
+      "name": "Hindi",
+      "id": "hi_IN",
+    },
+    {
+      "name": "Korean",
+      "id": "ko_KR",
+    },
+    {
+      "name": "Japanese",
+      "id": "ja_JP",
+    },
+    {
+      "name": "Russian",
+      "id": "ru_RU",
+    },
+    {
+      "name": "Arabic",
+      "id": "ar_AE",
+    },
+    {
+      "name": "French",
+      "id": "fr_FR",
+    },
+    {
+      "name": "Portuguese",
+      "id": "pt_PT",
+    },
+    {
+      "name": "Malay",
+      "id": "ms_MY",
+    },
+  ];
+
+  String _getLanguageCode(String language, String type) {
+    if (type == "input") {
+      return language.split("_")[0];
+    } else {
+      return language.split("-")[0];
+    }
+  }
+
+  Future<void> _handleSpeech() async {
+    if (_status != SttState.listening) {
+      await _stt.startListening();
+    } else {
+      await _stt.stopListening();
+    }
+  }
+
+  void _onSpeechResult(String text, SttState status, String emitted) async {
+    setState(() {
+      _status = status;
+    });
+    if (emitted == "done") {
+      await _translateSpeech(text);
+    }
   }
 
   Future<void> _pickFile() async {
+    setState(() {
+      _loading = true;
+    });
     FilePickerResult? result = await FilePicker.platform.pickFiles(
       type: FileType.audio,
       allowCompression: true,
@@ -80,33 +146,36 @@ class _SpeechPageState extends State<SpeechPage> {
 
     if (result != null) {
       setState(() {
-        _selectedFile = File(result.files.single.path!);
+        _selectedFilePath = result.files.single.path!;
       });
-      await _translateSpeech();
+      String transcribedText =
+          await _att.getText(_selectedInputLanguage, _selectedFilePath!);
+      await _translateSpeech(transcribedText);
+      setState(() {
+        _loading = false;
+      });
     }
   }
 
-  Future<void> _translateSpeech() async {
-    String transcribedText =
-        await _att.getText(_selectedInputLanguage, _selectedFile!.path);
+  Future<void> _translateSpeech(String text) async {
     String translatedOutput = await _translator.getTranslation(
-      transcribedText,
-      _getLanguageCode(_selectedInputLanguage),
-      _getLanguageCode(
-        _selectedOutputLanguage,
-      ),
+      text,
+      _getLanguageCode(_selectedInputLanguage, "input"),
+      _getLanguageCode(_selectedOutputLanguage, "output"),
     );
-    await _tts.download(
-        translatedOutput,
-        (_voices
-            .where((voice) => voice["id"] == _selectedOutputLanguage)
-            .toList())[0]["name"]);
-  }
 
-  void updateStatus(TtsState status) {
-    setState(() {
-      _status = status;
-    });
+    if (mounted) {
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+            builder: (context) => Output(
+                  text: translatedOutput,
+                  outputLang: (_voices
+                      .where((voice) => voice["id"] == _selectedOutputLanguage)
+                      .toList())[0]["name"],
+                )),
+      );
+    }
   }
 
   @override
@@ -121,119 +190,101 @@ class _SpeechPageState extends State<SpeechPage> {
         ),
         backgroundColor: Colors.blueAccent,
       ),
-      body: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: <Widget>[
-          _buildSpeechInputSection(),
-          const SizedBox(height: 20.0),
-          _buildTranslationOutputSection(),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildSpeechInputSection() {
-    return Container(
-      color: Colors.blue[200],
-      child: SizedBox(
-        height: MediaQuery.of(context).size.height * 0.3,
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            SizedBox(
-              width: double.infinity,
-              child: Row(
+      body: Center(
+        child: Container(
+          height: double.infinity,
+          color: Colors.blue[100],
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.spaceAround,
+            children: [
+              Row(
                 children: [
-                  Padding(
-                    padding: const EdgeInsets.all(16.0),
-                    child: Text(
-                      'Input Language',
-                      style: TextStyle(
-                          fontSize: 18.0,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.blue[800]),
-                    ),
+                  Column(
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.all(16.0),
+                        child: Text(
+                          'Input Language',
+                          style: TextStyle(
+                              fontSize: 18.0,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.blue[800]),
+                        ),
+                      ),
+                      DropdownButton<String>(
+                        value: _selectedInputLanguage,
+                        onChanged: (newValue) {
+                          setState(() {
+                            _selectedInputLanguage = newValue!;
+                          });
+                        },
+                        items: _sttVoices
+                            .map<DropdownMenuItem<String>>(
+                              (voice) => DropdownMenuItem<String>(
+                                value: voice["id"],
+                                child: Text(voice["name"]),
+                              ),
+                            )
+                            .toList(),
+                      ),
+                    ],
                   ),
-                  DropdownButton<String>(
-                    value: _selectedInputLanguage,
-                    onChanged: (newValue) {
-                      setState(() {
-                        _selectedInputLanguage = newValue!;
-                      });
-                    },
-                    items: _voices
-                        .map<DropdownMenuItem<String>>(
-                          (voice) => DropdownMenuItem<String>(
-                            value: voice["id"],
-                            child: Text(voice["name"]),
+                  Column(
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.all(16.0),
+                        child: Text(
+                          'Output Language',
+                          style: TextStyle(
+                            fontSize: 18.0,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.green[800],
                           ),
-                        )
-                        .toList(),
-                  ),
+                        ),
+                      ),
+                      const SizedBox(height: 10.0),
+                      DropdownButton<String>(
+                        value: _selectedOutputLanguage,
+                        onChanged: (newValue) async {
+                          setState(() {
+                            _selectedOutputLanguage = newValue!;
+                          });
+                          await _tts.setLanguage(newValue!);
+                        },
+                        items: _voices
+                            .map<DropdownMenuItem<String>>(
+                              (voice) => DropdownMenuItem<String>(
+                                value: voice["id"],
+                                child: Text(voice["name"]),
+                              ),
+                            )
+                            .toList(),
+                      ),
+                    ],
+                  )
                 ],
               ),
-            ),
-            const SizedBox(height: 20.0),
-            ElevatedButton(
-                onPressed: _pickFile,
-                child: const Text(
-                  "Pick Audio",
-                )),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildTranslationOutputSection() {
-    return Container(
-      color: Colors.green[200],
-      child: SizedBox(
-        height: MediaQuery.of(context).size.height * 0.5,
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Row(
-              children: [
-                Padding(
-                  padding: const EdgeInsets.all(16.0),
-                  child: Text(
-                    'Output Language',
-                    style: TextStyle(
-                      fontSize: 18.0,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.green[800],
+              const SizedBox(height: 20.0),
+              Column(
+                children: [
+                  _loading
+                      ? const CircularProgressIndicator()
+                      : ElevatedButton(
+                          onPressed: _pickFile,
+                          child: const Text(
+                            "Upload Audio",
+                          ),
+                        ),
+                  ElevatedButton(
+                    onPressed: _handleSpeech,
+                    child: const Text(
+                      "Speak",
                     ),
                   ),
-                ),
-                const SizedBox(height: 10.0),
-                DropdownButton<String>(
-                  value: _selectedOutputLanguage,
-                  onChanged: (newValue) async {
-                    setState(() {
-                      _selectedOutputLanguage = newValue!;
-                    });
-                    await _tts.setLanguage(newValue!);
-                  },
-                  items: _voices
-                      .map<DropdownMenuItem<String>>(
-                        (voice) => DropdownMenuItem<String>(
-                          value: voice["id"],
-                          child: Text(voice["name"]),
-                        ),
-                      )
-                      .toList(),
-                ),
-              ],
-            ),
-            _status == TtsState.downloading
-                ? const Text("Downloading...")
-                : _status == TtsState.initialized
-                    ? const Text("")
-                    : const Text(
-                        "See downloaded file in Audio section of phone",
-                      )
-          ],
+                ],
+              )
+            ],
+          ),
         ),
       ),
     );
